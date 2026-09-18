@@ -17,9 +17,9 @@ on:
         type: string
         default: ""
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
@@ -44,54 +44,48 @@ jobs:
       COMPOSE_PROJECT_NAME: docker-elk
 
     steps:
-      - name: Checkout code
-        uses: crashappsec/action-checkout@main
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
 
       ########################################################
       #                                                      #
       # Ensure §"Initial setup" of the README remains valid. #
       #                                                      #
       ########################################################
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-      - name: Assert instrumentation is live
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Set password of every built-in user to 'testpasswd'
+      run: >-
+        sed -i
+        -e 's/\(ELASTIC_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
+        -e 's/\(LOGSTASH_INTERNAL_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
+        -e 's/\(KIBANA_SYSTEM_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
+        -e 's/\(METRICBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
+        -e 's/\(FILEBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
+        -e 's/\(HEARTBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
+        -e 's/\(MONITORING_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
+        -e 's/\(BEATS_SYSTEM_PASSWORD=\)'\'\''/\1testpasswd/g'
+        .env
 
-      - name: Set password of every built-in user to 'testpasswd'
-        run: >-
-          sed -i
-          -e 's/\(ELASTIC_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
-          -e 's/\(LOGSTASH_INTERNAL_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
-          -e 's/\(KIBANA_SYSTEM_PASSWORD=\)'\''changeme'\''/\1testpasswd/g'
-          -e 's/\(METRICBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
-          -e 's/\(FILEBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
-          -e 's/\(HEARTBEAT_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
-          -e 's/\(MONITORING_INTERNAL_PASSWORD=\)'\'\''/\1testpasswd/g'
-          -e 's/\(BEATS_SYSTEM_PASSWORD=\)'\'\''/\1testpasswd/g'
-          .env
+    - name: Pre-build container images
+      run: >-
+        docker compose
+        -f docker-compose.yml
+        -f extensions/fleet/fleet-compose.yml
+        -f extensions/fleet/agent-apmserver-compose.yml
+        -f extensions/metricbeat/metricbeat-compose.yml
+        -f extensions/filebeat/filebeat-compose.yml
+        -f extensions/heartbeat/heartbeat-compose.yml
+        build
 
-      - name: Pre-build container images
-        run: >-
-          docker compose
-          -f docker-compose.yml
-          -f extensions/fleet/fleet-compose.yml
-          -f extensions/fleet/agent-apmserver-compose.yml
-          -f extensions/metricbeat/metricbeat-compose.yml
-          -f extensions/filebeat/filebeat-compose.yml
-          -f extensions/heartbeat/heartbeat-compose.yml
-          build
+    - name: Generate Kibana encryption keys
+      run: docker container run --rm docker-elk-kibana bin/kibana-encryption-keys generate -q >>kibana/config/kibana.yml
 
-      - name: Generate Kibana encryption keys
-        run: docker container run --rm docker-elk-kibana bin/kibana-encryption-keys generate -q >>kibana/config/kibana.yml
-
-      - name:  Set up users and roles
-        run: docker compose up --exit-code-from=setup setup
+    - name: Set up users and roles
+      run: docker compose up --exit-code-from=setup setup
 
       #############################
       #                           #
@@ -103,81 +97,81 @@ jobs:
       # Core components: Elasticsearch, Logstash, Kibana
       #
 
-      - name: Execute core test suite
-        run: |
-          docker compose up -d
-          .github/workflows/scripts/run-tests-core.sh
-          # next steps don't need Logstash
-          docker compose stop logstash
+    - name: Execute core test suite
+      run: |
+        docker compose up -d
+        .github/workflows/scripts/run-tests-core.sh
+        # next steps don't need Logstash
+        docker compose stop logstash
 
       #
       # Fleet
       #
 
-      - name: Execute Fleet test suite
-        run: |
-          docker compose -f docker-compose.yml -f extensions/fleet/fleet-compose.yml -f extensions/fleet/agent-apmserver-compose.yml up --remove-orphans -d fleet-server apm-server
-          .github/workflows/scripts/run-tests-fleet.sh
+    - name: Execute Fleet test suite
+      run: |
+        docker compose -f docker-compose.yml -f extensions/fleet/fleet-compose.yml -f extensions/fleet/agent-apmserver-compose.yml up --remove-orphans -d fleet-server apm-server
+        .github/workflows/scripts/run-tests-fleet.sh
 
       #
       # Metricbeat
       #
 
-      - name: Execute Metricbeat test suite
-        run: |
-          docker compose -f docker-compose.yml -f extensions/metricbeat/metricbeat-compose.yml up --remove-orphans -d metricbeat
-          .github/workflows/scripts/run-tests-metricbeat.sh
+    - name: Execute Metricbeat test suite
+      run: |
+        docker compose -f docker-compose.yml -f extensions/metricbeat/metricbeat-compose.yml up --remove-orphans -d metricbeat
+        .github/workflows/scripts/run-tests-metricbeat.sh
 
       #
       # Filebeat
       #
 
-      - name: Execute Filebeat test suite
-        run: |
-          docker compose -f docker-compose.yml -f extensions/filebeat/filebeat-compose.yml up --remove-orphans -d filebeat
-          .github/workflows/scripts/run-tests-filebeat.sh
+    - name: Execute Filebeat test suite
+      run: |
+        docker compose -f docker-compose.yml -f extensions/filebeat/filebeat-compose.yml up --remove-orphans -d filebeat
+        .github/workflows/scripts/run-tests-filebeat.sh
 
       #
       # Heartbeat
       #
 
-      - name: Execute Heartbeat test suite
-        run: |
-          docker compose -f docker-compose.yml -f extensions/heartbeat/heartbeat-compose.yml up --remove-orphans -d heartbeat
-          .github/workflows/scripts/run-tests-heartbeat.sh
+    - name: Execute Heartbeat test suite
+      run: |
+        docker compose -f docker-compose.yml -f extensions/heartbeat/heartbeat-compose.yml up --remove-orphans -d heartbeat
+        .github/workflows/scripts/run-tests-heartbeat.sh
 
-      - name: Collect troubleshooting data
-        id: debug-data
-        if: failure()
-        run: |
-          declare debug_data_dir="$(mktemp -d)"
+    - name: Collect troubleshooting data
+      id: debug-data
+      if: failure()
+      run: |
+        declare debug_data_dir="$(mktemp -d)"
 
-          docker compose \
-          -f docker-compose.yml \
-          -f extensions/fleet/fleet-compose.yml \
-          -f extensions/fleet/agent-apmserver-compose.yml \
-          -f extensions/metricbeat/metricbeat-compose.yml \
-          -f extensions/filebeat/filebeat-compose.yml \
-          -f extensions/heartbeat/heartbeat-compose.yml \
-          ps >"$debug_data_dir"/docker_ps.log
+        docker compose \
+        -f docker-compose.yml \
+        -f extensions/fleet/fleet-compose.yml \
+        -f extensions/fleet/agent-apmserver-compose.yml \
+        -f extensions/metricbeat/metricbeat-compose.yml \
+        -f extensions/filebeat/filebeat-compose.yml \
+        -f extensions/heartbeat/heartbeat-compose.yml \
+        ps >"$debug_data_dir"/docker_ps.log
 
-          docker compose \
-          -f docker-compose.yml \
-          -f extensions/fleet/fleet-compose.yml \
-          -f extensions/fleet/agent-apmserver-compose.yml \
-          -f extensions/metricbeat/metricbeat-compose.yml \
-          -f extensions/filebeat/filebeat-compose.yml \
-          -f extensions/heartbeat/heartbeat-compose.yml \
-          logs >"$debug_data_dir"/docker_logs.log
+        docker compose \
+        -f docker-compose.yml \
+        -f extensions/fleet/fleet-compose.yml \
+        -f extensions/fleet/agent-apmserver-compose.yml \
+        -f extensions/metricbeat/metricbeat-compose.yml \
+        -f extensions/filebeat/filebeat-compose.yml \
+        -f extensions/heartbeat/heartbeat-compose.yml \
+        logs >"$debug_data_dir"/docker_logs.log
 
-          echo "path=${debug_data_dir}" >>"$GITHUB_OUTPUT"
+        echo "path=${debug_data_dir}" >>"$GITHUB_OUTPUT"
 
-      - name: Upload collected troubleshooting data
-        if: always() && steps.debug-data.outputs.path
-        uses: actions/upload-artifact@v7
-        with:
-          name: debug-data
-          path: ${{ steps.debug-data.outputs.path }}/*.*
+    - name: Upload collected troubleshooting data
+      if: always() && steps.debug-data.outputs.path
+      uses: actions/upload-artifact@v7
+      with:
+        name: debug-data
+        path: ${{ steps.debug-data.outputs.path }}/*.*
 
         ##############
         #            #
@@ -185,14 +179,91 @@ jobs:
         #            #
         ##############
 
-      - name: Terminate all components
-        if: always()
-        run: >-
-          docker compose
-          -f docker-compose.yml
-          -f extensions/fleet/fleet-compose.yml
-          -f extensions/fleet/agent-apmserver-compose.yml
-          -f extensions/metricbeat/metricbeat-compose.yml
-          -f extensions/filebeat/filebeat-compose.yml
-          -f extensions/heartbeat/heartbeat-compose.yml
-          down -v
+    - name: Terminate all components
+      if: always()
+      run: >-
+        docker compose
+        -f docker-compose.yml
+        -f extensions/fleet/fleet-compose.yml
+        -f extensions/fleet/agent-apmserver-compose.yml
+        -f extensions/metricbeat/metricbeat-compose.yml
+        -f extensions/filebeat/filebeat-compose.yml
+        -f extensions/heartbeat/heartbeat-compose.yml
+        down -v
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
